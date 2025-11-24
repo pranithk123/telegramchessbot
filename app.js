@@ -212,7 +212,7 @@ bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
         {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start a game with friends.",
+            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start.",
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
                 [Markup.button.callback("🎮 Create New Game", "create_game")]
@@ -221,25 +221,51 @@ bot.command('start', (ctx) => {
     );
 });
 
+// 2. CREATE GAME BUTTON CLICKED
 bot.action("create_game", (ctx) => {
     const roomId = makeRoomId();
-    // REPLACE 'your_bot_username' and 'chess' with your actual details
-    // This creates a link that survives forwarding!
-    const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
+    const shareUrl = `https://t.me/${ctx.botInfo.username}/chess?startapp=${roomId}`;
 
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
         {
-            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\nTo invite a friend, click <b>"Share Game"</b> below!`,
+            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\nClick <b>"Share Game"</b> to send a formatted invite card to your friend.`,
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-                // 1. The Play Button (Use .url instead of .webApp so it persists)
                 [Markup.button.url("🚀 Play Now", shareUrl)],
-                // 2. The Share Button (Sends the link to a friend)
-                [Markup.button.url("📤 Share Game", `https://t.me/share/url?url=${shareUrl}&text=Play Chess with me!`)]
+                // CHANGED: This now switches to Inline Mode to send the card
+                [Markup.button.switchToChat("📤 Share Game", roomId)] 
             ])
         }
     );
+});
+
+// 3. INLINE QUERY (This generates the "Card" when they share)
+bot.on('inline_query', (ctx) => {
+    const roomId = ctx.inlineQuery.query; // Gets the Room ID passed from the button
+    if (!roomId) return;
+
+    // The link the friend will click
+    const shareUrl = `https://t.me/${ctx.botInfo.username}/chess?startapp=${roomId}`;
+
+    // Create the "Card" result
+    const result = {
+        type: 'photo',
+        id: roomId,
+        title: 'Play Chess',
+        description: 'Join my game!',
+        photo_url: 'https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg', // The big image
+        thumb_url: 'https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg',
+        caption: `♟️ <b>Chess Challenge!</b>\n\nI created a room. Can you beat me?`,
+        parse_mode: 'HTML',
+        reply_markup: {
+            inline_keyboard: [[
+                { text: "🚀 Play Chess", url: shareUrl } // This button sticks to the card!
+            ]]
+        }
+    };
+
+    return ctx.answerInlineQuery([result], { cache_time: 0 });
 });
 
 bot.launch();
