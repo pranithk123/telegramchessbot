@@ -223,16 +223,20 @@ bot.command('start', (ctx) => {
 
 bot.action("create_game", (ctx) => {
     const roomId = makeRoomId();
-    const gameLink = `${GAME_URL}/room/${roomId}`;
-    
+    // REPLACE 'your_bot_username' and 'chess' with your actual details
+    // This creates a link that survives forwarding!
+    const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
+
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
         {
-            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\n1. Tap 'Enter Game' to set up options.\n2. Then forward this message to a friend!`,
+            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\nTo invite a friend, click <b>"Share Game"</b> below!`,
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-                [Markup.button.webApp("🚀 Enter The Game", gameLink)],
-                [Markup.button.url("📤 Share Game", `https://t.me/share/url?url=${gameLink}&text=Play Chess with me!`)]
+                // 1. The Play Button (Use .url instead of .webApp so it persists)
+                [Markup.button.url("🚀 Play Now", shareUrl)],
+                // 2. The Share Button (Sends the link to a friend)
+                [Markup.button.url("📤 Share Game", `https://t.me/share/url?url=${shareUrl}&text=Play Chess with me!`)]
             ])
         }
     );
