@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==========================================
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
-const GAME_SHORT_NAME = "chess_v1"; // MUST match the short name created in BotFather
+const GAME_SHORT_NAME = "Optimal_Chess"; // MUST match the short name created in BotFather
 
 // ==========================================
 // GAME STATE
