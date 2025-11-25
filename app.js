@@ -208,9 +208,6 @@ io.on("connection", (socket) => {
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
-// REPLACE THIS with the Short Name you just created in BotFather
-const GAME_SHORT_NAME = "Optimal_Chess"; 
-
 // 1. START COMMAND
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
@@ -220,7 +217,6 @@ bot.command('start', (ctx) => {
             parse_mode: "HTML",
             reply_markup: {
                 inline_keyboard: [[
-                    // This is a standard callback button (allowed in Photos)
                     { text: "🎮 Create New Game", callback_data: "create_game" }
                 ]]
             }
@@ -228,44 +224,49 @@ bot.command('start', (ctx) => {
     );
 });
 
-// 2. ACTION (Sends the Actual Game)
+// 2. CREATE GAME (Sends the Forwardable Card)
 bot.action("create_game", (ctx) => {
     const roomId = makeRoomId();
+    // Use your Mini App Short Name here ('OptimalChess')
     const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
 
-    // Use "replyWithGame" here, and MUST include a Play/URL button first
-    ctx.replyWithGame("Optimal_Chess", { // <--- Quotes added here!
+    ctx.replyWithGame(GAME_SHORT_NAME, {
         reply_markup: {
-            inline_keyboard: [[
-                { text: "🚀 Play Now", url: shareUrl }, // First button = Play (URL or CallbackGame)
-                { text: "📤 Share Game", url: `https://t.me/share/url?url=${shareUrl}&text=Play Chess with me!` }
-            ]]
+            inline_keyboard: [
+                // ROW 1: Dummy Play Button (Required by Telegram)
+                [{ text: "♟️ Open Chess", callback_game: {} }],
+                
+                // ROW 2: The REAL "Join Room" Button (Persists on Forward!)
+                [{ text: "🚀 Play Room " + roomId, url: shareUrl }],
+                
+                // ROW 3: Easy Share Button
+                [{ text: "📤 Share Game", switch_inline_query: roomId }]
+            ]
         }
     });
 });
 
 // 3. INLINE QUERY (Sharing via @BotName)
 bot.on('inline_query', (ctx) => {
-    const roomId = ctx.inlineQuery.query || makeRoomId(); // Use provided ID or make new one
+    const roomId = ctx.inlineQuery.query || makeRoomId(); 
     const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
 
-    // Return a GAME result
     const result = {
         type: 'game',
         id: roomId,
         game_short_name: GAME_SHORT_NAME,
         reply_markup: {
-            inline_keyboard: [[
-                { text: "🚀 Play Room " + roomId, url: shareUrl }
-            ]]
+            inline_keyboard: [
+                [{ text: "♟️ Open Chess", callback_game: {} }],
+                [{ text: "🚀 Play Room " + roomId, url: shareUrl }]
+            ]
         }
     };
 
     return ctx.answerInlineQuery([result], { cache_time: 0 });
 });
 
-// 4. CATCH-ALL FOR DEFAULT "PLAY" BUTTON
-// (If they click the standard Telegram Play button, just open the main menu)
+// 4. GAME CALLBACK (Handles the dummy button)
 bot.gameQuery((ctx) => {
     return ctx.answerGameQuery(GAME_URL);
 });
