@@ -18,6 +18,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // CONFIGURATION
 // ==========================================
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
+// FIXED: Updated to your new Render URL
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
 const GAME_SHORT_NAME = "Optimal_Chess"; // Your Game Name from BotFather
 
@@ -198,7 +199,7 @@ io.on("connection", (socket) => {
 });
 
 // ==========================================
-// TELEGRAM BOT LOGIC
+// TELEGRAM BOT LOGIC (POLLING MODE)
 // ==========================================
 
 // FIX 1: Use custom agent to prevent ETIMEDOUT on Render
