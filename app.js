@@ -214,5 +214,22 @@ bot.on('inline_query', (ctx) => {
 
 bot.launch();
 
+const WEBHOOK_PATH = '/telegram-webhook';
+
+// 2. Tell Express to handle incoming updates from Telegram
+// This replaces bot.launch()
+app.use(bot.webhookCallback(WEBHOOK_PATH));
+
+// 3. Set the Webhook on Telegram's side
+// We use the GAME_URL you configured
+if (GAME_URL) {
+    bot.telegram.setWebhook(`${GAME_URL}${WEBHOOK_PATH}`)
+        .then(() => console.log(`✅ Webhook set to: ${GAME_URL}${WEBHOOK_PATH}`))
+        .catch(err => console.error("❌ Failed to set webhook:", err));
+} else {
+    console.warn("⚠️ GAME_URL is missing. Bot might not work via Webhook.");
+}
+
+// 4. Start the Server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
