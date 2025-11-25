@@ -1,7 +1,7 @@
 const express = require("express");
 const socketio = require("socket.io");
 const http = require("http");
-const https = require("https"); // Required for fixing Telegram timeout
+const https = require("https");
 const { Chess } = require("chess.js");
 const path = require("path");
 const crypto = require("crypto");
@@ -18,9 +18,8 @@ app.use(express.static(path.join(__dirname, "public")));
 // CONFIGURATION
 // ==========================================
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
-// FIXED: Updated to your new Render URL
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
-const GAME_SHORT_NAME = "Optimal_Chess"; // Your Game Name from BotFather
+const GAME_SHORT_NAME = "Optimal_Chess"; 
 
 // ==========================================
 // GAME STATE
@@ -199,14 +198,11 @@ io.on("connection", (socket) => {
 });
 
 // ==========================================
-// TELEGRAM BOT LOGIC (POLLING MODE)
+// TELEGRAM BOT LOGIC
 // ==========================================
-
-// FIX 1: Use custom agent to prevent ETIMEDOUT on Render
 const agent = new https.Agent({ family: 4 });
 const bot = new Telegraf(BOT_TOKEN, { telegram: { agent } });
 
-// 1. START COMMAND
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
@@ -222,32 +218,23 @@ bot.command('start', (ctx) => {
     );
 });
 
-// 2. ACTION (Sends the Forwardable Game Card)
 bot.action("create_game", (ctx) => {
     const roomId = makeRoomId();
-    // Use your Mini App Short Name here ('OptimalChess')
     const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
 
-    // FIX 2: Use replyWithGame + Dummy Button
     ctx.replyWithGame(GAME_SHORT_NAME, {
         reply_markup: {
             inline_keyboard: [
-                // ROW 1: Dummy Button (REQUIRED by Telegram API)
-                // We rename it to "Chess Menu" so users know it's not the specific room
-                [{ text: "♟️ Chess Menu", callback_game: {} }],
-                
-                // ROW 2: The REAL Button (Persists on Forward!)
-                // This is the one users MUST click to join the specific room
-                [{ text: "🚀 Launch Room " + roomId, url: shareUrl }],
-                
-                // ROW 3: Easy Share Button
+                // RENAMED to be clear it goes to Main Menu
+                [{ text: "🏠 Open Main Menu", callback_game: {} }],
+                // THIS is the button they must click
+                [{ text: "🚀 Join Room " + roomId, url: shareUrl }],
                 [{ text: "📤 Share Game", switch_inline_query: roomId }]
             ]
         }
     });
 });
 
-// 3. INLINE QUERY (Sharing via @BotName)
 bot.on('inline_query', (ctx) => {
     const roomId = ctx.inlineQuery.query || makeRoomId(); 
     const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
@@ -256,10 +243,13 @@ bot.on('inline_query', (ctx) => {
         type: 'game',
         id: roomId,
         game_short_name: GAME_SHORT_NAME,
+        // CLEARER INSTRUCTIONS in description
+        title: "Play Chess",
+        description: `Click 'Join Room ${roomId}' to play!`,
         reply_markup: {
             inline_keyboard: [
-                [{ text: "♟️ Chess Menu", callback_game: {} }],
-                [{ text: "🚀 Launch Room " + roomId, url: shareUrl }]
+                [{ text: "🏠 Open Main Menu", callback_game: {} }],
+                [{ text: "🚀 Join Room " + roomId, url: shareUrl }]
             ]
         }
     };
@@ -267,27 +257,20 @@ bot.on('inline_query', (ctx) => {
     return ctx.answerInlineQuery([result], { cache_time: 0 });
 });
 
-// 4. GAME CALLBACK (Handles the dummy button)
 bot.gameQuery((ctx) => {
-    // This opens the main menu because we can't get the Room ID here easily.
+    // Still goes to Home Page because we don't know the room ID here
     return ctx.answerGameQuery(GAME_URL);
 });
 
 // ==========================================
-// SERVER LAUNCH (SIMPLE POLLING)
+// SERVER LAUNCH
 // ==========================================
-
-// Start the Express Server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-// Start the Bot (with error handling for conflicts)
-bot.launch().then(() => {
-    console.log('🚀 Bot started (Polling Mode)');
-}).catch((err) => {
+bot.launch().catch((err) => {
     console.log('⚠️ Bot launch error:', err.message);
 });
 
-// Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
