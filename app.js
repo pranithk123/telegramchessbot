@@ -17,7 +17,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==========================================
 // CONFIGURATION
 // ==========================================
-const BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"; // <--- PASTE TOKEN HERE
+const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; // <--- PASTE TOKEN HERE
 const GAME_URL = "https://chessit.onrender.com"; 
 const GAME_SHORT_NAME = "Optimal_Chess"; 
 const PORT = process.env.PORT || 3000; 
@@ -262,7 +262,7 @@ bot.gameQuery((ctx) => {
 // ==========================================
 
 // 1. Generate a random path for the webhook
-const secretPath = `/telegraf/${crypto.randomBytes(8).toString('hex')}`;
+const secretPath = `/telegraf/${process.env.SECRET_PATH || "my-secret-path"}`;
 
 // 2. Set up the webhook listener on Express
 app.use(bot.webhookCallback(secretPath));
@@ -271,22 +271,26 @@ app.use(bot.webhookCallback(secretPath));
 server.listen(PORT, async () => {
     console.log(`✅ Server running on port ${PORT}`);
 
-    // Check if running on Render (Render automatically sets the 'RENDER' env var)
+    // Check if running on Render
     if (process.env.RENDER || GAME_URL.includes('render')) {
         console.log("🚀 Running on Render -> Setting Webhook...");
+        
+        const webhookUrl = `${GAME_URL}${secretPath}`;
+        
         try {
-            // Delete any old webhook first to be safe
-            await bot.telegram.deleteWebhook();
+            // Explicitly set the webhook to the known URL
+            const success = await bot.telegram.setWebhook(webhookUrl);
             
-            // Set the new one
-            await bot.telegram.setWebhook(`${GAME_URL}${secretPath}`);
-            console.log(`✅ Webhook successfully set to: ${GAME_URL}${secretPath}`);
+            if (success) {
+                console.log(`✅ Webhook successfully set to: ${webhookUrl}`);
+            } else {
+                console.error("❌ Telegram API returned false for setWebhook");
+            }
         } catch (err) {
             console.error("❌ Failed to set webhook:", err);
         }
     } else {
         console.log("💻 Running locally -> Starting Polling...");
-        // Only start polling if NOT on Render
         bot.launch();
     }
 });
