@@ -14,16 +14,16 @@ app.set("view engine", "ejs");
 app.use(express.static(path.join(__dirname, "public")));
 
 // ==========================================
-// CONFIGURATION (UPDATE THESE!)
+// CONFIGURATION
 // ==========================================
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
+const GAME_SHORT_NAME = "chess_v1"; // MUST match the short name created in BotFather
 
 // ==========================================
 // GAME STATE
 // ==========================================
 const rooms = Object.create(null);
-
 const makeRoomId = () => crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
 
 function createRoom(roomId) {
@@ -32,10 +32,10 @@ function createRoom(roomId) {
     white: null,
     black: null,
     watchers: new Set(),
-    timers: { w: 600, b: 600 }, // Default 10 min
+    timers: { w: 600, b: 600 },
     timerInterval: null,
     isTimerRunning: false,
-    settings: null // null = not set up yet
+    settings: null 
   };
   rooms[roomId] = room;
   return room;
@@ -45,16 +45,11 @@ function startRoomTimer(roomId) {
   const room = rooms[roomId];
   if (!room || room.isTimerRunning) return;
   room.isTimerRunning = true;
-
   if (room.timerInterval) clearInterval(room.timerInterval);
-
   room.timerInterval = setInterval(() => {
     const turn = room.chess.turn();
-    if (!turn) return;
-
     if (room.timers[turn] > 0) room.timers[turn]--;
     io.to(roomId).emit("timers", room.timers);
-
     if (room.timers[turn] <= 0) {
       clearInterval(room.timerInterval);
       room.isTimerRunning = false;
@@ -67,20 +62,18 @@ function startRoomTimer(roomId) {
 function stopRoomTimer(roomId) {
   const room = rooms[roomId];
   if (!room) return;
-  if (room.timerInterval) {
-    clearInterval(room.timerInterval);
-    room.timerInterval = null;
-  }
+  if (room.timerInterval) clearInterval(room.timerInterval);
   room.isTimerRunning = false;
 }
 
 // ==========================================
-// ROUTES
+// EXPRESS ROUTES
 // ==========================================
 app.get("/", (req, res) => res.render("index"));
+
 app.get("/room/:id", (req, res) => {
   const roomId = req.params.id.toUpperCase();
-  if (!rooms[roomId]) createRoom(roomId);
+  // We don't force create here; socket logic handles it if missing
   res.render("room", { roomId });
 });
 
@@ -88,27 +81,22 @@ app.get("/room/:id", (req, res) => {
 // SOCKET.IO LOGIC
 // ==========================================
 io.on("connection", (socket) => {
-  // 1. PRIVATE LOBBY CHECK
+  // 1. CHECK/CREATE ROOM
   socket.on("check_room_status", (roomId) => {
     roomId = roomId.toUpperCase();
     if (!rooms[roomId]) createRoom(roomId);
     const room = rooms[roomId];
     
-    // If settings are null, ask Creator to set them up
-    if (!room.settings) {
-        socket.emit("room_status", "empty"); 
-    } else {
-        // If settings exist, tell Guest to join
-        socket.emit("room_status", "waiting");
-    }
+    // Logic: If settings exist, it's a ready game. If not, it's new.
+    if (!room.settings) socket.emit("room_status", "empty"); 
+    else socket.emit("room_status", "waiting");
   });
 
-  // 2. CREATOR SAVES SETTINGS
+  // 2. INITIALIZE ROOM (Creator)
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
       const rId = roomId.toUpperCase();
       if (!rooms[rId]) return;
-
       rooms[rId].settings = settings;
       const t = parseInt(settings.time) || 600;
       rooms[rId].timers = { w: t, b: t };
@@ -122,71 +110,54 @@ io.on("connection", (socket) => {
 
     if (!rooms[roomId]) createRoom(roomId);
     const room = rooms[roomId];
-
     socket.join(roomId);
     socket.data.currentRoom = roomId;
 
-    // Priority: Forced Role (Creator)
-    if (forcedRole === "w") {
-      room.white = socket.id;
-      socket.emit("init", { role: "w", fen: room.chess.fen(), timers: room.timers });
-    } 
-    else if (forcedRole === "b") {
-      room.black = socket.id;
-      socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
+    // Role Assignment Logic
+    let assignedRole = null;
+    if (forcedRole) {
+        if(forcedRole === 'w' && !room.white) { room.white = socket.id; assignedRole = 'w'; }
+        else if(forcedRole === 'b' && !room.black) { room.black = socket.id; assignedRole = 'b'; }
     }
-    // Auto-Assign (Guest)
-    else {
-      if (room.white && !room.black) {
-        room.black = socket.id;
-        socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
-      }
-      else if (room.black && !room.white) {
-        room.white = socket.id;
-        socket.emit("init", { role: "w", fen: room.chess.fen(), timers: room.timers });
-      }
-      else {
-        room.watchers.add(socket.id);
-        socket.emit("init", { role: null, fen: room.chess.fen(), timers: room.timers });
-      }
+    
+    if (!assignedRole) {
+        if (!room.white) { room.white = socket.id; assignedRole = 'w'; }
+        else if (!room.black) { room.black = socket.id; assignedRole = 'b'; }
+        else assignedRole = 'spectator';
     }
+
+    socket.emit("init", { role: assignedRole, fen: room.chess.fen(), timers: room.timers });
 
     if (room.white && room.black) {
       io.to(roomId).emit("boardstate", room.chess.fen());
-      io.to(roomId).emit("timers", room.timers);
     }
   });
 
-  // 4. MOVE HANDLING
+  // 4. MOVE LOGIC
   socket.on("move", (data) => {
     try {
       const roomId = socket.data.currentRoom || data.roomId;
       if (!roomId || !rooms[roomId]) return;
       const room = rooms[roomId];
-      const mv = data.move;
-
       const turn = room.chess.turn();
+      
+      // Validate Turn
       if ((turn === "w" && socket.id !== room.white) || (turn === "b" && socket.id !== room.black)) return;
 
-      const result = room.chess.move(mv);
-      if (!result) return;
-
-      io.to(roomId).emit("move", mv);
-      io.to(roomId).emit("boardstate", room.chess.fen());
-      io.to(roomId).emit("timers", room.timers);
-
-      stopRoomTimer(roomId);
-      startRoomTimer(roomId);
-
-      if (room.chess.isGameOver()) {
+      const result = room.chess.move(data.move);
+      if (result) {
+        io.to(roomId).emit("move", data.move);
+        io.to(roomId).emit("boardstate", room.chess.fen());
+        io.to(roomId).emit("timers", room.timers);
         stopRoomTimer(roomId);
-        let winner = "";
-        if (room.chess.isCheckmate()) winner = room.chess.turn() === "w" ? "Black" : "White";
-        else if (room.chess.isDraw()) winner = "Draw";
-        else winner = "Game Over";
-        io.to(roomId).emit("gameover", winner);
+        startRoomTimer(roomId);
+
+        if (room.chess.isGameOver()) {
+            stopRoomTimer(roomId);
+            io.to(roomId).emit("gameover", "Game Over");
+        }
       }
-    } catch (err) {}
+    } catch (e) { console.error(e); }
   });
 
   socket.on("disconnect", () => {
@@ -195,9 +166,10 @@ io.on("connection", (socket) => {
       const room = rooms[roomId];
       if (room.white === socket.id) room.white = null;
       if (room.black === socket.id) room.black = null;
-      if (!room.white && !room.black) {
-        stopRoomTimer(roomId);
-        delete rooms[roomId];
+      // Clean up empty rooms if needed
+      if (!room.white && !room.black && !room.watchers.size) {
+          stopRoomTimer(roomId);
+          delete rooms[roomId];
       }
     }
   });
@@ -208,36 +180,39 @@ io.on("connection", (socket) => {
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
+// 1. Send the Game Launcher
 bot.command('start', (ctx) => {
-    ctx.replyWithPhoto(
-        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
-        {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start a game with friends.",
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback("🎮 Create New Game", "create_game")]
-            ])
-        }
-    );
+    return ctx.replyWithGame(GAME_SHORT_NAME);
 });
 
-bot.action("create_game", (ctx) => {
-    const roomId = makeRoomId();
-    const gameLink = `${GAME_URL}/room/${roomId}`;
+// 2. Handle the "Play" button click
+bot.gameQuery((ctx) => {
+    // We redirect the user to the MAIN MENU (index) 
+    // From there, they can click "Play with Friend" to create a room
+    // OR "Quickplay" to matchmake.
     
-    ctx.replyWithPhoto(
-        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
-        {
-            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\n1. Tap 'Enter Game' to set up options.\n2. Then forward this message to a friend!`,
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.webApp("🚀 Enter The Game", gameLink)],
-                [Markup.button.url("📤 Share Game", `https://t.me/share/url?url=${gameLink}&text=Play Chess with me!`)]
-            ])
-        }
-    );
+    // NOTE: If you want to support specific room joining via Deep Links,
+    // you would check ctx.callbackQuery.game_short_name logic here.
+    
+    const url = `${GAME_URL}/`; 
+    return ctx.answerGameQuery(url);
+});
+
+// 3. Optional: Handle "Share" via Inline Mode
+// If you use 'switchInlineQuery' in your frontend, this handles it.
+bot.on('inline_query', (ctx) => {
+    const query = ctx.inlineQuery.query;
+    
+    // If query is "share", send a fresh Game Message
+    // This allows the user to share the "Launcher" to any chat
+    return ctx.answerInlineQuery([{
+        type: 'game',
+        id: '0',
+        game_short_name: GAME_SHORT_NAME
+    }]);
 });
 
 bot.launch();
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
