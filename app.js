@@ -213,26 +213,31 @@ const GAME_SHORT_NAME = "Optimal_Chess";
 
 // 1. START COMMAND
 bot.command('start', (ctx) => {
-    ctx.replyWithGame(GAME_SHORT_NAME, {
-        reply_markup: {
-            inline_keyboard: [[
-                { text: "🎮 Create New Game", callback_data: "create_game" }
-            ]]
+    ctx.replyWithPhoto(
+        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
+        {
+            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start.",
+            parse_mode: "HTML",
+            reply_markup: {
+                inline_keyboard: [[
+                    // This is a standard callback button (allowed in Photos)
+                    { text: "🎮 Create New Game", callback_data: "create_game" }
+                ]]
+            }
         }
-    });
+    );
 });
 
-// 2. CREATE GAME (Sends the Forwardable Card)
+// 2. ACTION (Sends the Actual Game)
 bot.action("create_game", (ctx) => {
     const roomId = makeRoomId();
-    // This is the link that opens your specific room
-    const shareUrl = `https://t.me/${ctx.botInfo.username}/chess?startapp=${roomId}`;
+    const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
 
-    // We send a GAME (not a photo), so the buttons survive forwarding!
-    ctx.replyWithGame(GAME_SHORT_NAME, {
+    // Use "replyWithGame" here, and MUST include a Play/URL button first
+    ctx.replyWithGame("Optimal_Chess", { // <--- Quotes added here!
         reply_markup: {
             inline_keyboard: [[
-                { text: "🚀 Play Room " + roomId, url: shareUrl },
+                { text: "🚀 Play Now", url: shareUrl }, // First button = Play (URL or CallbackGame)
                 { text: "📤 Share Game", url: `https://t.me/share/url?url=${shareUrl}&text=Play Chess with me!` }
             ]]
         }
@@ -242,13 +247,13 @@ bot.action("create_game", (ctx) => {
 // 3. INLINE QUERY (Sharing via @BotName)
 bot.on('inline_query', (ctx) => {
     const roomId = ctx.inlineQuery.query || makeRoomId(); // Use provided ID or make new one
-    const shareUrl = `https://t.me/${ctx.botInfo.username}/chess?startapp=${roomId}`;
+    const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
 
     // Return a GAME result
     const result = {
         type: 'game',
         id: roomId,
-        game_short_name: GAME_SHORT_NAME,
+        game_short_name: "Optimal_Chess",
         reply_markup: {
             inline_keyboard: [[
                 { text: "🚀 Play Room " + roomId, url: shareUrl }
