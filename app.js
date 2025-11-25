@@ -1,7 +1,6 @@
 const express = require("express");
 const socketio = require("socket.io");
 const http = require("http");
-const https = require("https"); // Required for fixing Telegram timeout
 const { Chess } = require("chess.js");
 const path = require("path");
 const crypto = require("crypto");
@@ -15,12 +14,10 @@ app.set("view engine", "ejs");
 app.use(express.static(path.join(__dirname, "public")));
 
 // ==========================================
-// CONFIGURATION
+// CONFIGURATION (UPDATE THESE!)
 // ==========================================
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
-// FIXED: Updated to your new Render URL
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
-const GAME_SHORT_NAME = "Optimal_Chess"; // Your Game Name from BotFather
 
 // ==========================================
 // GAME STATE
@@ -35,10 +32,10 @@ function createRoom(roomId) {
     white: null,
     black: null,
     watchers: new Set(),
-    timers: { w: 600, b: 600 },
+    timers: { w: 600, b: 600 }, // Default 10 min
     timerInterval: null,
     isTimerRunning: false,
-    settings: null 
+    settings: null // null = not set up yet
   };
   rooms[roomId] = room;
   return room;
@@ -91,18 +88,22 @@ app.get("/room/:id", (req, res) => {
 // SOCKET.IO LOGIC
 // ==========================================
 io.on("connection", (socket) => {
+  // 1. PRIVATE LOBBY CHECK
   socket.on("check_room_status", (roomId) => {
     roomId = roomId.toUpperCase();
     if (!rooms[roomId]) createRoom(roomId);
     const room = rooms[roomId];
     
+    // If settings are null, ask Creator to set them up
     if (!room.settings) {
         socket.emit("room_status", "empty"); 
     } else {
+        // If settings exist, tell Guest to join
         socket.emit("room_status", "waiting");
     }
   });
 
+  // 2. CREATOR SAVES SETTINGS
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
       const rId = roomId.toUpperCase();
@@ -113,6 +114,7 @@ io.on("connection", (socket) => {
       rooms[rId].timers = { w: t, b: t };
   });
 
+  // 3. JOIN ROOM
   socket.on("joinRoom", data => {
     let roomId, forcedRole;
     if (typeof data === "string") roomId = data.toUpperCase();
@@ -124,6 +126,7 @@ io.on("connection", (socket) => {
     socket.join(roomId);
     socket.data.currentRoom = roomId;
 
+    // Priority: Forced Role (Creator)
     if (forcedRole === "w") {
       room.white = socket.id;
       socket.emit("init", { role: "w", fen: room.chess.fen(), timers: room.timers });
@@ -132,6 +135,7 @@ io.on("connection", (socket) => {
       room.black = socket.id;
       socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
     }
+    // Auto-Assign (Guest)
     else {
       if (room.white && !room.black) {
         room.black = socket.id;
@@ -153,6 +157,7 @@ io.on("connection", (socket) => {
     }
   });
 
+  // 4. MOVE HANDLING
   socket.on("move", (data) => {
     try {
       const roomId = socket.data.currentRoom || data.roomId;
@@ -199,94 +204,40 @@ io.on("connection", (socket) => {
 });
 
 // ==========================================
-// TELEGRAM BOT LOGIC (POLLING MODE)
+// TELEGRAM BOT LOGIC
 // ==========================================
+const bot = new Telegraf(BOT_TOKEN);
 
-// FIX 1: Use custom agent to prevent ETIMEDOUT on Render
-const agent = new https.Agent({ family: 4 });
-const bot = new Telegraf(BOT_TOKEN, { telegram: { agent } });
-
-// 1. START COMMAND
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
         {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start.",
+            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start a game with friends.",
             parse_mode: "HTML",
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "🎮 Create New Game", callback_data: "create_game" }
-                ]]
-            }
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback("🎮 Create New Game", "create_game")]
+            ])
         }
     );
 });
 
-// 2. ACTION (Sends the Forwardable Game Card)
 bot.action("create_game", (ctx) => {
     const roomId = makeRoomId();
-    // Use your Mini App Short Name here ('OptimalChess')
-    const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
-
-    ctx.replyWithGame(GAME_SHORT_NAME, {
-        reply_markup: {
-            inline_keyboard: [
-                // ROW 1: Dummy Button (REQUIRED by Telegram API)
-                // We rename it to "Chess Menu" so users know it's not the specific room
-                [{ text: "♟️ Chess Menu", callback_game: {} }],
-                
-                // ROW 2: The REAL Button (Persists on Forward!)
-                // This is the one users MUST click to join the specific room
-                [{ text: "🚀 Launch Room " + roomId, url: shareUrl }],
-                
-                // ROW 3: Easy Share Button
-                [{ text: "📤 Share Game", switch_inline_query: roomId }]
-            ]
+    const gameLink = `${GAME_URL}/room/${roomId}`;
+    
+    ctx.replyWithPhoto(
+        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
+        {
+            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\n1. Tap 'Enter Game' to set up options.\n2. Then forward this message to a friend!`,
+            parse_mode: "HTML",
+            ...Markup.inlineKeyboard([
+                [Markup.button.webApp("🚀 Enter The Game", gameLink)],
+                [Markup.button.url("📤 Share Game", `https://t.me/share/url?url=${gameLink}&text=Play Chess with me!`)]
+            ])
         }
-    });
+    );
 });
 
-// 3. INLINE QUERY (Sharing via @BotName)
-bot.on('inline_query', (ctx) => {
-    const roomId = ctx.inlineQuery.query || makeRoomId(); 
-    const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
-
-    const result = {
-        type: 'game',
-        id: roomId,
-        game_short_name: GAME_SHORT_NAME,
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: "♟️ Chess Menu", callback_game: {} }],
-                [{ text: "🚀 Launch Room " + roomId, url: shareUrl }]
-            ]
-        }
-    };
-
-    return ctx.answerInlineQuery([result], { cache_time: 0 });
-});
-
-// 4. GAME CALLBACK (Handles the dummy button)
-bot.gameQuery((ctx) => {
-    // This opens the main menu because we can't get the Room ID here easily.
-    return ctx.answerGameQuery(GAME_URL);
-});
-
-// ==========================================
-// SERVER LAUNCH (SIMPLE POLLING)
-// ==========================================
-
-// Start the Express Server
+bot.launch();
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
-// Start the Bot (with error handling for conflicts)
-bot.launch().then(() => {
-    console.log('🚀 Bot started (Polling Mode)');
-}).catch((err) => {
-    console.log('⚠️ Bot launch error:', err.message);
-});
-
-// Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
