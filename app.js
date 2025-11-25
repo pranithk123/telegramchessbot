@@ -253,7 +253,7 @@ bot.on('inline_query', (ctx) => {
     const result = {
         type: 'game',
         id: roomId,
-        game_short_name: "Optimal_Chess",
+        game_short_name: GAME_SHORT_NAME,
         reply_markup: {
             inline_keyboard: [[
                 { text: "🚀 Play Room " + roomId, url: shareUrl }
