@@ -225,32 +225,21 @@ bot.command('start', (ctx) => {
 // 2. ACTION (Sends the Forwardable Game Card)
 bot.action("create_game", (ctx) => {
     const roomId = makeRoomId();
+    // Use your Mini App Short Name here ('OptimalChess')
     const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
 
     ctx.replyWithGame(GAME_SHORT_NAME, {
         reply_markup: {
             inline_keyboard: [
-                // REMOVED THE DUMMY BUTTON
-                // REPLACED "Play Optimal Chess" with "Play Room [ID]"
-                // NOTE: The first button MUST be a game button to avoid API errors.
-                // We make THIS button the game button, but we accept that
-                // for forwarding to work perfectly with deep links, 
-                // we still include the URL button as a fallback or primary.
+                // ROW 1: Dummy Button (REQUIRED by Telegram API)
+                // We rename it to "Chess Menu" so users know it's not the specific room
+                [{ text: "♟️ Chess Menu", callback_game: {} }],
                 
-                // HOWEVER, per your request to remove the 1st "Open Chess" button:
-                // We will make the URL button the MAIN button in visual hierarchy 
-                // by putting it first? NO, Telegram forbids URL button as first button in game.
-                
-                // WORKAROUND: We label the mandatory callback button as "Play Room..."
-                // but keep the URL button for forwarding reliability.
-                
-                // ROW 1: Mandatory Callback Button (Labeled as Play Room)
-                [{ text: "♟️ Play Room " + roomId, callback_game: {} }],
-                
-                // ROW 2: The Forward-Proof Link (Also Labeled Play Room)
+                // ROW 2: The REAL Button (Persists on Forward!)
+                // This is the one users MUST click to join the specific room
                 [{ text: "🚀 Launch Room " + roomId, url: shareUrl }],
                 
-                // ROW 3: Share
+                // ROW 3: Easy Share Button
                 [{ text: "📤 Share Game", switch_inline_query: roomId }]
             ]
         }
@@ -268,7 +257,7 @@ bot.on('inline_query', (ctx) => {
         game_short_name: GAME_SHORT_NAME,
         reply_markup: {
             inline_keyboard: [
-                [{ text: "♟️ Play Room " + roomId, callback_game: {} }],
+                [{ text: "♟️ Chess Menu", callback_game: {} }],
                 [{ text: "🚀 Launch Room " + roomId, url: shareUrl }]
             ]
         }
@@ -277,18 +266,9 @@ bot.on('inline_query', (ctx) => {
     return ctx.answerInlineQuery([result], { cache_time: 0 });
 });
 
-// 4. GAME CALLBACK (CRITICAL FIX)
-// This handles the "Play" button click (the callback_game button)
+// 4. GAME CALLBACK (Handles the dummy button)
 bot.gameQuery((ctx) => {
-    // To make the "Play Room [ID]" button work without a database,
-    // we have to send the user to the main menu URL.
-    // Unfortunately, without the URL button, we can't pass the ID safely on forwarded messages.
-    // But we can try to open the specific room URL directly.
-    
-    // Since we don't have the room ID here (Telegram doesn't send it in this specific callback 
-    // for inline messages unless we stored it), we default to the game URL.
-    // The USER should click the "Launch Room" button for deep linking to work 100% reliably.
-    
+    // This opens the main menu because we can't get the Room ID here easily.
     return ctx.answerGameQuery(GAME_URL);
 });
 
