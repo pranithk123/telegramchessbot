@@ -208,64 +208,61 @@ io.on("connection", (socket) => {
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
+// REPLACE THIS with the Short Name you just created in BotFather
+const GAME_SHORT_NAME = "Optimal_Chess"; 
+
+// 1. START COMMAND
 bot.command('start', (ctx) => {
-    ctx.replyWithPhoto(
-        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
-        {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start.",
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback("🎮 Create New Game", "create_game")]
-            ])
-        }
-    );
-});
-
-// 2. CREATE GAME BUTTON CLICKED
-bot.action("create_game", (ctx) => {
-    const roomId = makeRoomId();
-    const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
-
-    ctx.replyWithPhoto(
-        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
-        {
-            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\nClick <b>"Share Game"</b> to send a formatted invite card to your friend.`,
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.url("🚀 Play Now", shareUrl)],
-                // CHANGED: This now switches to Inline Mode to send the card
-                [Markup.button.switchToChat("📤 Share Game", roomId)] 
-            ])
-        }
-    );
-});
-
-// 3. INLINE QUERY (This generates the "Card" when they share)
-bot.on('inline_query', (ctx) => {
-    const roomId = ctx.inlineQuery.query; // Gets the Room ID passed from the button
-    if (!roomId) return;
-
-    // The link the friend will click
-    const shareUrl = `https://t.me/${ctx.botInfo.username}/OptimalChess?startapp=${roomId}`;
-
-    // Create the "Card" result
-    const result = {
-        type: 'photo',
-        id: roomId,
-        title: 'Play Chess',
-        description: 'Join my game!',
-        photo_url: 'https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg', // The big image
-        thumb_url: 'https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg',
-        caption: `♟️ <b>Chess Challenge!</b>\n\nI created a room. Can you beat me?`,
-        parse_mode: 'HTML',
+    ctx.replyWithGame(GAME_SHORT_NAME, {
         reply_markup: {
             inline_keyboard: [[
-                { text: "🚀 Play Chess", url: shareUrl } // This button sticks to the card!
+                { text: "🎮 Create New Game", callback_data: "create_game" }
+            ]]
+        }
+    });
+});
+
+// 2. CREATE GAME (Sends the Forwardable Card)
+bot.action("create_game", (ctx) => {
+    const roomId = makeRoomId();
+    // This is the link that opens your specific room
+    const shareUrl = `https://t.me/${ctx.botInfo.username}/chess?startapp=${roomId}`;
+
+    // We send a GAME (not a photo), so the buttons survive forwarding!
+    ctx.replyWithGame(GAME_SHORT_NAME, {
+        reply_markup: {
+            inline_keyboard: [[
+                { text: "🚀 Play Room " + roomId, url: shareUrl },
+                { text: "📤 Share Game", url: `https://t.me/share/url?url=${shareUrl}&text=Play Chess with me!` }
+            ]]
+        }
+    });
+});
+
+// 3. INLINE QUERY (Sharing via @BotName)
+bot.on('inline_query', (ctx) => {
+    const roomId = ctx.inlineQuery.query || makeRoomId(); // Use provided ID or make new one
+    const shareUrl = `https://t.me/${ctx.botInfo.username}/chess?startapp=${roomId}`;
+
+    // Return a GAME result
+    const result = {
+        type: 'game',
+        id: roomId,
+        game_short_name: GAME_SHORT_NAME,
+        reply_markup: {
+            inline_keyboard: [[
+                { text: "🚀 Play Room " + roomId, url: shareUrl }
             ]]
         }
     };
 
     return ctx.answerInlineQuery([result], { cache_time: 0 });
+});
+
+// 4. CATCH-ALL FOR DEFAULT "PLAY" BUTTON
+// (If they click the standard Telegram Play button, just open the main menu)
+bot.gameQuery((ctx) => {
+    return ctx.answerGameQuery(GAME_URL);
 });
 
 bot.launch();
