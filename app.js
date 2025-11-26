@@ -16,22 +16,28 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==========================================
 // CONFIGURATION
 // ==========================================
+// Replace this with your actual Bot Token
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
+
+// Replace this with your actual Render URL
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
-const GAME_SHORT_NAME = "Optimal_Chess"; // Must match BotFather exactly
+
+// IMPORTANT: This MUST match the Short Name you set in @BotFather
+const GAME_SHORT_NAME = "Optimal_Chess"; 
 
 // ==========================================
-// SESSION MANAGEMENT (The Fix)
+// GAME STATE & SESSION TRACKING
 // ==========================================
 const rooms = Object.create(null);
 
-// 1. Remembers which room a user created/joined last
-// Key: UserId, Value: RoomId
+// Tracks which room a user is currently hosting/playing in
 const userSessions = new Map(); 
 
-// 2. Links a Shared Message to a specific Room
-// Key: InlineMessageId, Value: RoomId
+// Links Inline Messages (Shared via button) to Rooms
 const inlineGameMappings = new Map();
+
+// Links Standard Messages (Forwarded/Groups) to Rooms
+const messageGameMappings = new Map();
 
 const makeRoomId = () => crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
 
@@ -84,7 +90,7 @@ function stopRoomTimer(roomId) {
 }
 
 // ==========================================
-// ROUTES
+// EXPRESS ROUTES
 // ==========================================
 app.get("/", (req, res) => res.render("index"));
 app.get("/room/:id", (req, res) => {
@@ -110,7 +116,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 2. INITIALIZE ROOM
+  // 2. CREATOR SAVES SETTINGS
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
       const rId = roomId.toUpperCase();
@@ -142,6 +148,7 @@ io.on("connection", (socket) => {
       socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
     }
     else {
+      // Auto-assign Logic
       if (room.white && !room.black) {
         room.black = socket.id;
         socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
@@ -162,7 +169,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 4. MOVES
+  // 4. MOVE HANDLING
   socket.on("move", (data) => {
     try {
       const roomId = socket.data.currentRoom || data.roomId;
@@ -213,6 +220,7 @@ io.on("connection", (socket) => {
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
+// 1. Start Command
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
@@ -226,22 +234,22 @@ bot.command('start', (ctx) => {
     );
 });
 
+// 2. Create Game Button Handler
 bot.action("create_game", (ctx) => {
-    // 1. Standard Game Button
-    // 2. Share Button (Switches to Inline Mode)
+    // We send the Game with a "Play" button and a "Share" button
+    // The "Play" button MUST be first.
     return ctx.replyWithGame(GAME_SHORT_NAME, Markup.inlineKeyboard([
         [Markup.button.game("♟️ Play Chess")],
-        [Markup.button.switchToChat("📤 Share with Friends", "play")] 
+        [Markup.button.switchToChat("📤 Share with Friends", "play")]
     ]));
 });
 
-// --- THE CORE FIX IS HERE ---
-
+// 3. Play Button Handler (Logic for Pairing & Forwarding)
 bot.gameQuery((ctx) => {
     let roomId;
     const { inline_message_id, message, from } = ctx.callbackQuery;
 
-    // --- CASE 1: SHARED VIA INLINE BUTTON (The Best Way) ---
+    // --- CASE 1: SHARED VIA INLINE BUTTON ---
     if (inline_message_id) {
         if (inlineGameMappings.has(inline_message_id)) {
             roomId = inlineGameMappings.get(inline_message_id);
@@ -250,14 +258,13 @@ bot.gameQuery((ctx) => {
             inlineGameMappings.set(inline_message_id, roomId);
         }
     } 
-    // --- CASE 2: FORWARDED MESSAGE (The "GameFactory" Trick) ---
+    // --- CASE 2: FORWARDED MESSAGE (Group Pairing) ---
     else if (message) {
-        // 1. Check if this message is a "Forward" from someone else
-        // (Telegram changed API recently, so we check both old and new fields)
+        // Check if the message is forwarded
         const forwardedFrom = message.forward_from || 
                              (message.forward_origin && message.forward_origin.sender_user);
 
-        // 2. If it is forwarded, try to find the Original Sender's game
+        // If forwarded, try to find the room user 1 is in
         if (forwardedFrom) {
             const hostsRoom = userSessions.get(forwardedFrom.id);
             if (hostsRoom) {
@@ -265,40 +272,40 @@ bot.gameQuery((ctx) => {
             }
         }
         
-        // 3. If we still don't have a room (e.g. not forwarded, or host has no game)
+        // If we still don't have a room, check if this exact message has a room assigned
         if (!roomId) {
-            // Check if this exact message has a room (Group Chat Logic)
             const messageKey = `${message.chat.id}_${message.message_id}`;
             if (messageGameMappings.has(messageKey)) {
                 roomId = messageGameMappings.get(messageKey);
             } else {
-                // LAST RESORT: Create a new room
                 roomId = makeRoomId();
                 messageGameMappings.set(messageKey, roomId);
             }
         }
     }
+    // --- CASE 3: FALLBACK ---
+    else {
+        roomId = makeRoomId();
+    }
 
-    // Always update the session for the user who just clicked
-    // So if THEY share the game later, their friends join THIS room.
+    // Save this as the "Active Room" for the user who just clicked
     userSessions.set(from.id, roomId);
 
     const gameUrl = `${GAME_URL}/room/${roomId}`;
     return ctx.answerGameQuery(gameUrl);
 });
 
-// When user clicks "Share with Friends", this triggers
+// 4. Inline Query (Share Button)
 bot.on('inline_query', (ctx) => {
     const userId = ctx.from.id;
-    // Find the room this user just created/joined
     let roomId = userSessions.get(userId);
-
-    // Fallback if they haven't joined a room yet
+    
+    // Fallback
     if (!roomId) roomId = "new_game";
 
     const results = [{
         type: 'game',
-        id: roomId, // We use the Room ID as the Result ID
+        id: roomId,
         game_short_name: GAME_SHORT_NAME,
         reply_markup: Markup.inlineKeyboard([
             [Markup.button.game("♟️ Play Chess")]
@@ -307,13 +314,10 @@ bot.on('inline_query', (ctx) => {
     return ctx.answerInlineQuery(results);
 });
 
-// When the user actually sends the game to a chat
+// 5. Save Room ID when game is shared
 bot.on('chosen_inline_result', (ctx) => {
     const { inline_message_id, result_id } = ctx.update.chosen_inline_result;
-    
-    // result_id is the roomId we packed in the step above
     if (result_id && result_id !== "new_game") {
-        // Now we link this specific sent message to that Room ID
         inlineGameMappings.set(inline_message_id, result_id);
     }
 });
