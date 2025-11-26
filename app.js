@@ -234,18 +234,14 @@ bot.on('inline_query', (ctx) => {
 });
 
 bot.action("create_game", (ctx) => {
-    // Make sure "Optimal_Chess" matches your BotFather game short name exactly
-    return ctx.replyWithGame("Optimal_Chess", {
-        ...Markup.inlineKeyboard([
-            // --- ROW 1: MANDATORY GAME BUTTON ---
-            // This specific button type triggers the gameQuery
-            [Markup.button.game("♟️ Play Chess")], 
-            
-            // --- ROW 2: SHARE BUTTON ---
-            // This button lets users forward the game to others
-            [Markup.button.switchToChat("📤 Share with Friends", "play")]
-        ])
-    });
+    // FIX: Pass Markup.inlineKeyboard directly, DO NOT put it inside { ... }
+    return ctx.replyWithGame("Optimal_Chess", Markup.inlineKeyboard([
+        // Row 1: The Game Button (Mandatory)
+        [Markup.button.game("♟️ Play Chess")],
+        
+        // Row 2: The Share Button
+        [Markup.button.switchToChat("📤 Share with Friends", "play")]
+    ]));
 });
 
 bot.gameQuery((ctx) => {
