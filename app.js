@@ -78,10 +78,10 @@ function stopRoomTimer(roomId) {
 // ROUTES
 // ==========================================
 app.get("/", (req, res) => res.render("index"));
-app.get("/room/:id", (req, res) => {
-  const roomId = req.params.id.toUpperCase();
-  if (!rooms[roomId]) createRoom(roomId);
-  res.render("room", { roomId });
+
+// Game WebApp Page (always the same page, room handled in JS)
+app.get("/room", (req, res) => {
+  res.render("room");
 });
 
 // ==========================================
@@ -222,26 +222,38 @@ bot.command('start', (ctx) => {
 });
 
 bot.action("create_game", async (ctx) => {
-    await ctx.answerCbQuery();
-    
-    const roomId = makeRoomId();
-    const gameLink = `${GAME_URL}/room/${roomId}`;
+  await ctx.answerCbQuery();
 
-    // Send game message
-    await ctx.replyWithGame("Optimal_Chess", {
-        reply_markup: {
-            inline_keyboard: [
-                // Game Button (NO URL HERE)
-                [{ text: "▶️ Play", callback_game: {} }],
+  const roomId = makeRoomId();
 
-                // WebApp Button shows the room explicitly
-                [Markup.button.webApp("🚀 Enter The Game", gameLink)]
-            ]
-        }
-    });
+  // Send the special GAME preview message
+  await ctx.replyWithGame("Optimal_Chess", {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "▶️ Play",
+            callback_game: {}  // Needed ONLY to display "GAME"
+          }
+        ],
+        [
+          {
+            text: "🎮 Open Game",
+            web_app: { url: `${GAME_URL}/room` }
+          }
+        ]
+      ]
+    }
+  });
 
-    // Send deep-link so forwarded messages open the same room
-    await ctx.reply(`Invite a friend: https://t.me/${ctx.botInfo.username}?start=${roomId}`);
+  // Store room-id for this user securely
+  ctx.session = { roomId };
+});
+
+bot.on("callback_query", async (ctx) => {
+  if (ctx.callbackQuery.game_short_name === "Optimal_Chess") {
+    await ctx.answerGameQuery(`https://telegramchessbot.onrender.com/room`);
+  }
 });
 
 
