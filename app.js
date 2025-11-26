@@ -222,28 +222,23 @@ bot.command('start', (ctx) => {
 });
 
 bot.action("create_game", async (ctx) => {
+    await ctx.answerCbQuery();
+
     const roomId = makeRoomId();
     const gameLink = `${GAME_URL}/room/${roomId}`;
 
     await ctx.replyWithGame("Optimal_Chess", {
         reply_markup: {
             inline_keyboard: [
-                [
-                  { text: "🚀 Enter The Game", url: gameLink }
-                ]
+                [{ text: "▶️ Play", callback_game: {} }],
+                [{ text: "🚀 Enter The Game", url: gameLink }]
             ]
         }
     });
 });
 
-bot.catch((err) => {
-  console.error("Telegram Bot Error:", err.description || err.message);
-});
 
-bot.launch().then(() => {
-  console.log("🤖 Telegram Bot Started");
-}).catch(err => {
-  console.error("❌ Failed to start bot:", err.message);
-});
+
+bot.launch();
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
