@@ -221,21 +221,45 @@ bot.command('start', (ctx) => {
     );
 });
 
-bot.action("create_game", (ctx) => {
-    const roomId = makeRoomId();
-    const gameLink = `${GAME_URL}/room/${roomId}`;
-    
-    ctx.replyWithPhoto(
-        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
+bot.on('inline_query', (ctx) => {
+    const results = [
         {
-            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\n1. Tap 'Enter Game' to set up options.\n2. Then forward this message to a friend!`,
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.webApp("🚀 Enter The Game", gameLink)],
-                [Markup.button.url("📤 Share Game", `https://t.me/share/url?url=${gameLink}&text=Play Chess with me!`)]
-            ])
+            type: 'game',
+            id: '0',
+            game_short_name: 'chessgame', // Must match BotFather short name
+            // This ensures the game is sharable via inline mode
         }
-    );
+    ];
+    return ctx.answerInlineQuery(results);
+});
+
+bot.action("create_game", (ctx) => {
+    // 1. We don't generate the Room ID here anymore.
+    // We just send the Game invitation. The Room ID will be generated
+    // when the user actually clicks "Play".
+    
+    // "chessgame" must match the Short Name you made in BotFather
+    return ctx.replyWithGame("chessgame", {
+        ...Markup.inlineKeyboard([
+            // You can add a "Share" button that triggers an inline query to share the game
+            [Markup.button.switchToChat("TB 📤 Share Game with Friends", "play")] 
+        ])
+    });
+});
+
+bot.gameQuery((ctx) => {
+    // Generate a unique Room ID for this specific game session
+    // Note: In a real production app, you might want to link this to the 
+    // ctx.callbackQuery.inline_message_id to keep everyone in the same room 
+    // if they click the same message.
+    
+    const roomId = makeRoomId(); 
+    
+    // This is the URL the button will open
+    const gameUrl = `${GAME_URL}/room/${roomId}`;
+
+    // Answer the query with the URL. This opens the game window.
+    return ctx.answerGameQuery(gameUrl);
 });
 
 bot.launch();
