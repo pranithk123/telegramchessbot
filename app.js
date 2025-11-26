@@ -14,15 +14,22 @@ app.set("view engine", "ejs");
 app.use(express.static(path.join(__dirname, "public")));
 
 // ==========================================
-// CONFIGURATION (UPDATE THESE!)
+// CONFIGURATION
 // ==========================================
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
+const GAME_SHORT_NAME = "Optimal_Chess"; // Must match BotFather
 
 // ==========================================
-// GAME STATE
+// GAME STATE MANAGEMENT
 // ==========================================
 const rooms = Object.create(null);
+
+// 1. Map to track which room a user just created/joined
+const userSessions = new Map(); 
+
+// 2. Map to link a specific Shared Message (inline) to a Room ID
+const inlineGameMappings = new Map();
 
 const makeRoomId = () => crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
 
@@ -32,10 +39,10 @@ function createRoom(roomId) {
     white: null,
     black: null,
     watchers: new Set(),
-    timers: { w: 600, b: 600 }, // Default 10 min
+    timers: { w: 600, b: 600 },
     timerInterval: null,
     isTimerRunning: false,
-    settings: null // null = not set up yet
+    settings: null
   };
   rooms[roomId] = room;
   return room;
@@ -75,9 +82,10 @@ function stopRoomTimer(roomId) {
 }
 
 // ==========================================
-// ROUTES
+// EXPRESS ROUTES
 // ==========================================
 app.get("/", (req, res) => res.render("index"));
+
 app.get("/room/:id", (req, res) => {
   const roomId = req.params.id.toUpperCase();
   if (!rooms[roomId]) createRoom(roomId);
@@ -88,22 +96,20 @@ app.get("/room/:id", (req, res) => {
 // SOCKET.IO LOGIC
 // ==========================================
 io.on("connection", (socket) => {
-  // 1. PRIVATE LOBBY CHECK
+  // 1. CHECK STATUS
   socket.on("check_room_status", (roomId) => {
     roomId = roomId.toUpperCase();
     if (!rooms[roomId]) createRoom(roomId);
     const room = rooms[roomId];
     
-    // If settings are null, ask Creator to set them up
     if (!room.settings) {
         socket.emit("room_status", "empty"); 
     } else {
-        // If settings exist, tell Guest to join
         socket.emit("room_status", "waiting");
     }
   });
 
-  // 2. CREATOR SAVES SETTINGS
+  // 2. INITIALIZE ROOM
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
       const rId = roomId.toUpperCase();
@@ -126,7 +132,6 @@ io.on("connection", (socket) => {
     socket.join(roomId);
     socket.data.currentRoom = roomId;
 
-    // Priority: Forced Role (Creator)
     if (forcedRole === "w") {
       room.white = socket.id;
       socket.emit("init", { role: "w", fen: room.chess.fen(), timers: room.timers });
@@ -135,7 +140,6 @@ io.on("connection", (socket) => {
       room.black = socket.id;
       socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
     }
-    // Auto-Assign (Guest)
     else {
       if (room.white && !room.black) {
         room.black = socket.id;
@@ -157,7 +161,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 4. MOVE HANDLING
+  // 4. MOVES
   socket.on("move", (data) => {
     try {
       const roomId = socket.data.currentRoom || data.roomId;
@@ -204,15 +208,16 @@ io.on("connection", (socket) => {
 });
 
 // ==========================================
-// TELEGRAM BOT LOGIC
+// TELEGRAM BOT LOGIC (UPDATED)
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
+// 1. Initial Start Command
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
         {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start a game with friends.",
+            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start.",
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
                 [Markup.button.callback("🎮 Create New Game", "create_game")]
@@ -221,42 +226,66 @@ bot.command('start', (ctx) => {
     );
 });
 
-bot.on('inline_query', (ctx) => {
-    const results = [
-        {
-            type: 'game',
-            id: '0',
-            game_short_name: 'Optimal_Chess', // Must match BotFather short name
-            // This ensures the game is sharable via inline mode
-        }
-    ];
-    return ctx.answerInlineQuery(results);
-});
-
+// 2. Action when clicking "Create New Game"
 bot.action("create_game", (ctx) => {
-    // FIX: Pass Markup.inlineKeyboard directly, DO NOT put it inside { ... }
-    return ctx.replyWithGame("Optimal_Chess", Markup.inlineKeyboard([
-        // Row 1: The Game Button (Mandatory)
+    // FIX: Pass Markup.inlineKeyboard directly without { ... }
+    return ctx.replyWithGame(GAME_SHORT_NAME, Markup.inlineKeyboard([
         [Markup.button.game("♟️ Play Chess")],
-        
-        // Row 2: The Share Button
-        [Markup.button.switchToChat("📤 Share with Friends", "play")]
+        // "play" query triggers the inline handler below
+        [Markup.button.switchToChat("📤 Share with Friends", "play")] 
     ]));
 });
 
+// 3. Handle "Play" Button Click (Launch Game)
 bot.gameQuery((ctx) => {
-    // Generate a unique Room ID for this specific game session
-    // Note: In a real production app, you might want to link this to the 
-    // ctx.callbackQuery.inline_message_id to keep everyone in the same room 
-    // if they click the same message.
-    
-    const roomId = makeRoomId(); 
-    
-    // This is the URL the button will open
-    const gameUrl = `${GAME_URL}/room/${roomId}`;
+    let roomId;
+    const { inline_message_id, from } = ctx.callbackQuery;
 
-    // Answer the query with the URL. This opens the game window.
+    // SCENARIO A: User clicks "Play" on a shared inline message
+    if (inline_message_id && inlineGameMappings.has(inline_message_id)) {
+        roomId = inlineGameMappings.get(inline_message_id);
+    } 
+    // SCENARIO B: User creates a new game (or clicks Play in private chat)
+    else {
+        roomId = makeRoomId();
+        // Save this as the "active" room for this user (so they can share it)
+        userSessions.set(from.id, roomId);
+    }
+
+    const gameUrl = `${GAME_URL}/room/${roomId}`;
     return ctx.answerGameQuery(gameUrl);
+});
+
+// 4. Handle "Share" Button (Inline Query)
+bot.on('inline_query', (ctx) => {
+    const userId = ctx.from.id;
+    // Retrieve the room ID the user was just playing in
+    let roomId = userSessions.get(userId);
+
+    // If we can't find a room, we create a generic one (fallback)
+    if (!roomId) roomId = "new_game";
+
+    const results = [{
+        type: 'game',
+        id: roomId, // Store Room ID in the Result ID
+        game_short_name: GAME_SHORT_NAME,
+        reply_markup: Markup.inlineKeyboard([
+            [Markup.button.game("♟️ Play Chess")]
+        ])
+    }];
+    return ctx.answerInlineQuery(results);
+});
+
+// 5. Handle Sharing (When User 1 actually sends the game to User 2)
+// (Requires /setinlinefeedback in BotFather)
+bot.on('chosen_inline_result', (ctx) => {
+    const { inline_message_id, result_id } = ctx.update.chosen_inline_result;
+    
+    // result_id contains the roomId from step 4
+    if (result_id && result_id !== "new_game") {
+        // Link this specific message ID to that Room ID
+        inlineGameMappings.set(inline_message_id, result_id);
+    }
 });
 
 bot.launch();
