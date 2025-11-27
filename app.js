@@ -16,22 +16,18 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==========================================
 // CONFIGURATION
 // ==========================================
-// Replace with your actual Bot Token
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
-
-// Replace with your actual Render URL
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
-
-// MUST match the Short Name in @BotFather
 const GAME_SHORT_NAME = "Optimal_Chess"; 
 
 // ==========================================
-// GAME STATE & SESSION MANAGEMENT
+// SESSION MANAGEMENT
 // ==========================================
 const rooms = Object.create(null);
 
-// Tracks the Room ID a user is trying to join
-const userSessions = new Map(); 
+// Mappings to track rooms
+const inlineGameMappings = new Map(); // Key: inline_message_id, Value: roomId
+const userSessions = new Map(); // Key: userId, Value: roomId (for initial creation)
 
 const makeRoomId = () => crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
 
@@ -50,6 +46,7 @@ function createRoom(roomId) {
   return room;
 }
 
+// ... (Keep startRoomTimer and stopRoomTimer functions exactly as before) ...
 function startRoomTimer(roomId) {
   const room = rooms[roomId];
   if (!room || room.isTimerRunning) return;
@@ -97,6 +94,7 @@ app.get("/room/:id", (req, res) => {
 // SOCKET.IO LOGIC
 // ==========================================
 io.on("connection", (socket) => {
+  // ... (Keep your existing Socket.IO logic exactly the same) ...
   // 1. CHECK STATUS
   socket.on("check_room_status", (roomId) => {
     roomId = roomId.toUpperCase();
@@ -110,7 +108,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 2. INITIALIZE ROOM (Creator Settings)
+  // 2. INITIALIZE ROOM
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
       const rId = roomId.toUpperCase();
@@ -209,109 +207,81 @@ io.on("connection", (socket) => {
 });
 
 // ==========================================
-// TELEGRAM BOT LOGIC (DEEP LINKING IMPLEMENTED)
+// TELEGRAM BOT LOGIC
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
 // 1. START COMMAND
-// This handles BOTH standard "/start" AND deep links like "/start join_12345"
-bot.start((ctx) => {
-    const payload = ctx.startPayload; // This captures "join_12345"
-    
-    // SCENARIO A: User clicked an Invite Link
-    if (payload && payload.startsWith("join_")) {
-        const roomId = payload.split("_")[1];
-        
-        // Save the Room ID for this specific user
-        userSessions.set(ctx.from.id, roomId);
-        
-        // Send them a FRESH game message
-        // Since this message is new, the "Play" button will work perfectly
-        return ctx.replyWithGame(GAME_SHORT_NAME, Markup.inlineKeyboard([
-             [Markup.button.game("♟️ Launch Game")]
-        ]));
-    }
-
-    // SCENARIO B: User just typed /start (Home Screen)
+// Just shows a button to switch to Inline Mode
+bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
         {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to create a game.",
+            caption: "<b>Welcome to Chess Master!</b>\n\nTo start a game, click the button below and select the game from the menu.",
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-                [Markup.button.callback("🎮 Create New Game", "create_game")]
+                // This switches the user to inline mode: "@YourBot "
+                [Markup.button.switchToInlineQuery("🎮 Create New Game", "")]
             ])
         }
     );
 });
 
-// 2. CREATE GAME ACTION
-// Instead of sending a game, we send an "Invite Card" with a URL
-bot.action("create_game", async (ctx) => {
+// 2. INLINE QUERY HANDLER
+// This generates the "Game Message" in the popup menu
+bot.on('inline_query', (ctx) => {
+    // Generate a potential Room ID
     const roomId = makeRoomId();
-    // Ensure room exists in memory
-    if(!rooms[roomId]) createRoom(roomId);
 
-    // Create the Deep Link: t.me/BotName?start=join_ROOMID
-    const botUsername = ctx.botInfo.username;
-    const deepLink = `https://t.me/${botUsername}?start=join_${roomId}`;
-
-    await ctx.replyWithPhoto("https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", {
-        caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\nForward this message to a friend so they can join!`,
-        parse_mode: "HTML",
-        reply_markup: {
-            inline_keyboard: [
-                // THIS URL BUTTON SURVIVES FORWARDING
-                [{ text: "♟️ Play Chess", url: deepLink }],
-                // Share button for inline mode (optional, but good to have)
-                [{ text: "📤 Share", switch_inline_query: "play" }]
-            ]
-        }
-    });
+    const results = [{
+        type: 'game',
+        id: roomId, // We use the Room ID as the Result ID
+        game_short_name: GAME_SHORT_NAME,
+        reply_markup: Markup.inlineKeyboard([
+             // The Play button (Standard Game Button)
+            [Markup.button.game("♟️ Play Chess")],
+            // The Share button (switches context to share the game)
+            [Markup.button.switchToChat("📤 Share with Friends", "")] 
+        ])
+    }];
+    
+    // We cache this calculation for 0 seconds so every time they type, they get a new ID if needed
+    // (Or we can rely on chosen_inline_result to set the final ID)
+    return ctx.answerInlineQuery(results, { cache_time: 0 });
 });
 
-// 3. LAUNCH GAME
-// This triggers when user clicks "Launch Game" (from Step 1)
-bot.gameQuery((ctx) => {
-    // We look up which room this user is supposed to be in
-    let roomId = userSessions.get(ctx.from.id);
+// 3. CHOSEN INLINE RESULT (The Magic Step)
+// This fires when the user actually taps the game to send it.
+// We capture the PERMANENT inline_message_id here.
+bot.on('chosen_inline_result', (ctx) => {
+    const { inline_message_id, result_id } = ctx.update.chosen_inline_result;
     
-    // Fallback if session is lost (e.g. server restart)
-    if (!roomId) {
+    // result_id IS the roomId we generated in step 2
+    if (result_id) {
+        // We create the room in memory
+        if(!rooms[result_id]) createRoom(result_id);
+        
+        // We link this specific message (which can be forwarded!) to the room
+        inlineGameMappings.set(inline_message_id, result_id);
+        console.log(`Game created! MsgID: ${inline_message_id} -> Room: ${result_id}`);
+    }
+});
+
+// 4. GAME QUERY HANDLER (When "Play" is clicked)
+bot.gameQuery((ctx) => {
+    const { inline_message_id } = ctx.callbackQuery;
+    let roomId;
+
+    if (inline_message_id && inlineGameMappings.has(inline_message_id)) {
+        // If this message (or its forward) is known, join that room
+        roomId = inlineGameMappings.get(inline_message_id);
+    } else {
+        // Fallback: If for some reason we lost the mapping (server restart), create new
         roomId = makeRoomId();
-        userSessions.set(ctx.from.id, roomId);
     }
 
     const gameUrl = `${GAME_URL}/room/${roomId}`;
     return ctx.answerGameQuery(gameUrl);
-});
-
-// 4. INLINE QUERY (Share Button)
-bot.on('inline_query', (ctx) => {
-    const userId = ctx.from.id;
-    let roomId = userSessions.get(userId);
-    if (!roomId) roomId = "new_game";
-
-    // Even the inline query uses the deep link now!
-    const deepLink = `https://t.me/${ctx.botInfo.username}?start=join_${roomId}`;
-
-    const results = [{
-        type: 'article',
-        id: roomId,
-        title: 'Play Chess',
-        description: 'Click to join my Chess Game',
-        thumb_url: "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
-        input_message_content: {
-            message_text: `♟️ <b>Join my Chess Game!</b>\n\nClick the button below to play.`,
-            parse_mode: "HTML"
-        },
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: "♟️ Play Chess", url: deepLink }]
-            ]
-        }
-    }];
-    return ctx.answerInlineQuery(results);
 });
 
 bot.launch();
