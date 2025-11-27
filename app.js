@@ -16,14 +16,21 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==========================================
 // CONFIGURATION
 // ==========================================
+// Replace with your actual Bot Token
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
+
+// Replace with your actual Render URL
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
+
+// MUST match the Short Name in @BotFather
 const GAME_SHORT_NAME = "Optimal_Chess"; 
 
 // ==========================================
-// SESSION MANAGEMENT
+// GAME STATE & SESSION MANAGEMENT
 // ==========================================
 const rooms = Object.create(null);
+
+// Tracks the Room ID a user is trying to join
 const userSessions = new Map(); 
 
 const makeRoomId = () => crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
@@ -103,7 +110,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 2. INITIALIZE ROOM
+  // 2. INITIALIZE ROOM (Creator Settings)
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
       const rId = roomId.toUpperCase();
@@ -202,28 +209,30 @@ io.on("connection", (socket) => {
 });
 
 // ==========================================
-// TELEGRAM BOT LOGIC
+// TELEGRAM BOT LOGIC (DEEP LINKING IMPLEMENTED)
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
-// 1. START COMMAND (Handles both /start and /start join_ROOMID)
+// 1. START COMMAND
+// This handles BOTH standard "/start" AND deep links like "/start join_12345"
 bot.start((ctx) => {
-    // Check if the user clicked a Deep Link (e.g., t.me/Bot?start=join_AB12CD)
-    const payload = ctx.startPayload; 
+    const payload = ctx.startPayload; // This captures "join_12345"
     
+    // SCENARIO A: User clicked an Invite Link
     if (payload && payload.startsWith("join_")) {
         const roomId = payload.split("_")[1];
         
-        // Save the Room ID for this user
+        // Save the Room ID for this specific user
         userSessions.set(ctx.from.id, roomId);
         
-        // Send the ACTUAL Game Message (This is fresh, so the button works!)
+        // Send them a FRESH game message
+        // Since this message is new, the "Play" button will work perfectly
         return ctx.replyWithGame(GAME_SHORT_NAME, Markup.inlineKeyboard([
              [Markup.button.game("♟️ Launch Game")]
         ]));
     }
 
-    // Standard Start Message
+    // SCENARIO B: User just typed /start (Home Screen)
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
         {
@@ -236,12 +245,14 @@ bot.start((ctx) => {
     );
 });
 
-// 2. CREATE GAME (Sends an INVITE CARD, not the game directly)
+// 2. CREATE GAME ACTION
+// Instead of sending a game, we send an "Invite Card" with a URL
 bot.action("create_game", async (ctx) => {
     const roomId = makeRoomId();
+    // Ensure room exists in memory
     if(!rooms[roomId]) createRoom(roomId);
 
-    // This URL is safe to forward!
+    // Create the Deep Link: t.me/BotName?start=join_ROOMID
     const botUsername = ctx.botInfo.username;
     const deepLink = `https://t.me/${botUsername}?start=join_${roomId}`;
 
@@ -250,21 +261,23 @@ bot.action("create_game", async (ctx) => {
         parse_mode: "HTML",
         reply_markup: {
             inline_keyboard: [
-                // THIS BUTTON IS A URL BUTTON. IT NEVER BREAKS ON FORWARD.
+                // THIS URL BUTTON SURVIVES FORWARDING
                 [{ text: "♟️ Play Chess", url: deepLink }],
+                // Share button for inline mode (optional, but good to have)
                 [{ text: "📤 Share", switch_inline_query: "play" }]
             ]
         }
     });
 });
 
-// 3. LAUNCH GAME (When user clicks "Launch Game")
+// 3. LAUNCH GAME
+// This triggers when user clicks "Launch Game" (from Step 1)
 bot.gameQuery((ctx) => {
-    // Get the Room ID we saved in the "start" handler or "create_game"
+    // We look up which room this user is supposed to be in
     let roomId = userSessions.get(ctx.from.id);
     
+    // Fallback if session is lost (e.g. server restart)
     if (!roomId) {
-        // Fallback: Create new room if tracking failed
         roomId = makeRoomId();
         userSessions.set(ctx.from.id, roomId);
     }
@@ -279,6 +292,7 @@ bot.on('inline_query', (ctx) => {
     let roomId = userSessions.get(userId);
     if (!roomId) roomId = "new_game";
 
+    // Even the inline query uses the deep link now!
     const deepLink = `https://t.me/${ctx.botInfo.username}?start=join_${roomId}`;
 
     const results = [{
