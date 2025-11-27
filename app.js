@@ -18,12 +18,15 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==========================================
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
-const GAME_SHORT_NAME = "Optimal_Chess"; 
+const GAME_SHORT_NAME = "Optimal_Chess"; // Matches your BotFather setting
 
 // ==========================================
-// SESSION MANAGEMENT
+// GAME STATE
 // ==========================================
 const rooms = Object.create(null);
+
+// Mappings: Inline Message ID -> Room ID
+// This is the "via @Bot" secret. Inline IDs are permanent, so they survive forwarding.
 const inlineGameMappings = new Map(); 
 
 const makeRoomId = () => crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
@@ -90,7 +93,6 @@ app.get("/room/:id", (req, res) => {
 // SOCKET.IO LOGIC
 // ==========================================
 io.on("connection", (socket) => {
-  // 1. CHECK STATUS
   socket.on("check_room_status", (roomId) => {
     roomId = roomId.toUpperCase();
     if (!rooms[roomId]) createRoom(roomId);
@@ -103,7 +105,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 2. INITIALIZE ROOM
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
       const rId = roomId.toUpperCase();
@@ -114,7 +115,6 @@ io.on("connection", (socket) => {
       rooms[rId].timers = { w: t, b: t };
   });
 
-  // 3. JOIN ROOM
   socket.on("joinRoom", data => {
     let roomId, forcedRole;
     if (typeof data === "string") roomId = data.toUpperCase();
@@ -155,7 +155,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 4. MOVE HANDLING
   socket.on("move", (data) => {
     try {
       const roomId = socket.data.currentRoom || data.roomId;
@@ -202,12 +201,12 @@ io.on("connection", (socket) => {
 });
 
 // ==========================================
-// TELEGRAM BOT LOGIC (VIDEO REPLICA)
+// TELEGRAM BOT LOGIC
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
 // 1. START COMMAND
-// Matches 00:00 - 00:03 in your video
+// Matches Video 00:00 - 00:04
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
@@ -215,35 +214,38 @@ bot.command('start', (ctx) => {
             caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start.",
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-                // Matches 00:04: Opens inline mode instantly with empty query
+                // THIS BUTTON AUTOMATICALLY OPENS THE INLINE MENU
+                // This mimics the "autotyping" you see in the video.
                 [Markup.button.switchToCurrentChat("🎮 Create New Game Here", "")]
             ])
         }
     );
 });
 
-// 2. INLINE QUERY
-// Matches 00:05: Shows the game card in the popup list
+// 2. INLINE QUERY HANDLER
+// Matches Video 00:05: Shows the game card in the list
 bot.on('inline_query', (ctx) => {
     const roomId = makeRoomId(); // Create a potential Room ID
 
     const results = [{
         type: 'game',
-        id: roomId, // Use Room ID as Result ID
+        id: roomId, // Store Room ID in result ID
         game_short_name: GAME_SHORT_NAME,
         reply_markup: Markup.inlineKeyboard([
-            [Markup.button.game("Enter The Game")], // Matches 00:06 button text
-            [Markup.button.switchToChat("📤 Share", "")]
+            // Matches Screenshot: Button 1 "Enter The Game"
+            [Markup.button.game("Enter The Game")],
+            // Matches Screenshot: Button 2 "Call..."
+            [Markup.button.switchToChat("Call OptimalChessBot", "")] 
         ])
     }];
     
-    // cache_time: 0 is important so every tap generates a NEW room
+    // cache_time: 0 is important so every time you open the menu, it's a NEW game
     return ctx.answerInlineQuery(results, { cache_time: 0, is_personal: true });
 });
 
-// 3. CHOSEN INLINE RESULT
-// Matches 00:06: This runs when you TAP the game in the list.
-// This is where we create the room and link the "Forwardable" ID.
+// 3. CHOSEN INLINE RESULT (THE KEY STEP)
+// Matches Video 00:06: Runs when you TAP the game in the list.
+// This is the moment the game is created and sent with the "via" tag.
 bot.on('chosen_inline_result', (ctx) => {
     const { inline_message_id, result_id } = ctx.update.chosen_inline_result;
     
@@ -251,14 +253,14 @@ bot.on('chosen_inline_result', (ctx) => {
     if (result_id) {
         if(!rooms[result_id]) createRoom(result_id);
         
-        // SAVE THIS ID! This is the one that survives forwarding.
+        // Link the "Forward-Proof" Message ID to the Room ID
         inlineGameMappings.set(inline_message_id, result_id);
-        console.log(`✅ Game Created via Inline! Room: ${result_id}`);
+        console.log(`✅ Game Created (Inline)! Room: ${result_id}`);
     }
 });
 
 // 4. GAME LAUNCHER
-// Matches 00:26: When user clicks the FORWARDED message
+// Matches Video 00:26: Handles joining from the forwarded message
 bot.gameQuery((ctx) => {
     const { inline_message_id } = ctx.callbackQuery;
     let roomId;
