@@ -90,15 +90,17 @@ app.get("/room/:id", (req, res) => {
 io.on("connection", (socket) => {
   // 1. PRIVATE LOBBY CHECK
   socket.on("check_room_status", (roomId) => {
-    roomId = roomId.toUpperCase();
+    // Don't uppercase inline IDs (they are case-sensitive!)
+    // roomId = roomId.toUpperCase(); <--- REMOVE THIS LINE
+    
+    // Create the room if it doesn't exist (First player clicked Play)
     if (!rooms[roomId]) createRoom(roomId);
+    
     const room = rooms[roomId];
     
-    // If settings are null, ask Creator to set them up
     if (!room.settings) {
         socket.emit("room_status", "empty"); 
     } else {
-        // If settings exist, tell Guest to join
         socket.emit("room_status", "waiting");
     }
   });
@@ -106,7 +108,7 @@ io.on("connection", (socket) => {
   // 2. CREATOR SAVES SETTINGS
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
-      const rId = roomId.toUpperCase();
+      const rId = roomId;
       if (!rooms[rId]) return;
 
       rooms[rId].settings = settings;
@@ -117,8 +119,8 @@ io.on("connection", (socket) => {
   // 3. JOIN ROOM
   socket.on("joinRoom", data => {
     let roomId, forcedRole;
-    if (typeof data === "string") roomId = data.toUpperCase();
-    else { roomId = data.roomId.toUpperCase(); forcedRole = data.role; }
+    if (typeof data === "string") roomId = data;
+    else { roomId = data.roomId ; forcedRole = data.role; }
 
     if (!rooms[roomId]) createRoom(roomId);
     const room = rooms[roomId];
@@ -208,36 +210,61 @@ io.on("connection", (socket) => {
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
+// Replace this with the Short Name you got from BotFather (e.g. 'chess')
+const GAME_SHORT_NAME = "Optimal_Chess"; 
+
+// 1. START COMMAND
+// Instead of creating a room immediately, we give a button to "Switch to Inline Mode"
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
         {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start a game with friends.",
+            caption: "<b>Welcome to Chess Master!</b>\n\nTo play with a friend, click the button below to create a game table.",
             parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback("🎮 Create New Game", "create_game")]
-            ])
+            reply_markup: {
+                inline_keyboard: [
+                    // "switch_inline_query_current_chat" opens the input field with your bot's name
+                    [{ text: "🎮 Create New Game", switch_inline_query_current_chat: "create" }]
+                ]
+            }
         }
     );
 });
 
-bot.action("create_game", (ctx) => {
-    const roomId = makeRoomId();
-    const gameLink = `${GAME_URL}/room/${roomId}`;
+// 2. HANDLE INLINE QUERY (This creates the "Forwardable" Game Message)
+bot.on('inline_query', async (ctx) => {
+    // We answer with a "Game" result. 
+    // This creates the message with the "via @YourBot" tag.
+    const results = [{
+        type: 'game',
+        id: '1', // Just a unique ID for this result item
+        game_short_name: GAME_SHORT_NAME,
+        // You can add a custom reply_markup (buttons) here if you want extra links
+        // reply_markup: { inline_keyboard: [[{text: "Join Channel", url: "..."}]] } 
+    }];
     
-    ctx.replyWithPhoto(
-        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
-        {
-            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\n1. Tap 'Enter Game' to set up options.\n2. Then forward this message to a friend!`,
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.webApp("🚀 Enter The Game", gameLink)],
-                [Markup.button.url("📤 Share Game", `https://t.me/share/url?url=${gameLink}&text=Play Chess with me!`)]
-            ])
-        }
-    );
+    return ctx.answerInlineQuery(results);
+});
+
+// 3. HANDLE "PLAY" BUTTON CLICKS
+bot.on('callback_query', (ctx) => {
+    // Check if the clicked button is a Game Button
+    if (ctx.callbackQuery.game_short_name !== GAME_SHORT_NAME) return;
+
+    // "inline_message_id" is the unique ID that PERSISTS when forwarded!
+    const gameId = ctx.callbackQuery.inline_message_id;
+
+    if (gameId) {
+        // We use this ID as the Room ID
+        const gameUrl = `${GAME_URL}/room/${gameId}`;
+        return ctx.answerGameQuery(gameUrl);
+    } else {
+        // Fallback (if they somehow clicked a non-inline game)
+        return ctx.answerGameQuery(GAME_URL);
+    }
 });
 
 bot.launch();
+// ... rest of server code ...
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
