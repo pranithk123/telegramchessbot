@@ -215,15 +215,17 @@ const GAME_SHORT_NAME = "Optimal_Chess";
 
 // 1. START COMMAND
 // Instead of creating a room immediately, we give a button to "Switch to Inline Mode"
+// 1. START COMMAND - Gives the "Create" button
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
         {
-            caption: "<b>Welcome to Chess Master!</b>\n\nTo play with a friend, click the button below to create a game table.",
+            caption: "<b>Welcome to Chess Master!</b>\n\nTap below to create a game table.",
             parse_mode: "HTML",
             reply_markup: {
                 inline_keyboard: [
-                    // "switch_inline_query_current_chat" opens the input field with your bot's name
+                    // 'switch_inline_query_current_chat' is the trick.
+                    // It opens the "Via" menu automatically so the user just taps to send.
                     [{ text: "🎮 Create New Game", switch_inline_query_current_chat: "create" }]
                 ]
             }
@@ -231,35 +233,35 @@ bot.command('start', (ctx) => {
     );
 });
 
-// 2. HANDLE INLINE QUERY (This creates the "Forwardable" Game Message)
-bot.on('inline_query', async (ctx) => {
-    // We answer with a "Game" result. 
-    // This creates the message with the "via @YourBot" tag.
+// 2. HANDLE THE "CREATE" ACTION (Generates the Game Message)
+bot.on('inline_query', (ctx) => {
+    // This creates the message with the "via @YourBot" tag
     const results = [{
         type: 'game',
-        id: '1', // Just a unique ID for this result item
+        id: '1', 
         game_short_name: GAME_SHORT_NAME,
-        // You can add a custom reply_markup (buttons) here if you want extra links
-        // reply_markup: { inline_keyboard: [[{text: "Join Channel", url: "..."}]] } 
+        // The game message will use the native "Play" button automatically
     }];
     
-    return ctx.answerInlineQuery(results);
+    // Cache time 0 ensures it doesn't get stuck
+    return ctx.answerInlineQuery(results, { cache_time: 0 });
 });
 
-// 3. HANDLE "PLAY" BUTTON CLICKS
+// 3. HANDLE "PLAY" CLICK (The persistent button)
 bot.on('callback_query', (ctx) => {
-    // Check if the clicked button is a Game Button
+    // We only care if they clicked the Game button
     if (ctx.callbackQuery.game_short_name !== GAME_SHORT_NAME) return;
 
-    // "inline_message_id" is the unique ID that PERSISTS when forwarded!
+    // THIS IS THE KEY: 'inline_message_id' persists when forwarded!
+    // We use this Telegram-generated ID as our Room ID.
     const gameId = ctx.callbackQuery.inline_message_id;
 
     if (gameId) {
-        // We use this ID as the Room ID
+        // Send user to the game with this Persistent ID
         const gameUrl = `${GAME_URL}/room/${gameId}`;
         return ctx.answerGameQuery(gameUrl);
     } else {
-        // Fallback (if they somehow clicked a non-inline game)
+        // Fallback (should not happen with this setup)
         return ctx.answerGameQuery(GAME_URL);
     }
 });
