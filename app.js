@@ -18,6 +18,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==========================================
 const BOT_TOKEN = "8332605905:AAEPxxEvTpkiYO6LjV7o1-ASa5ufIqxtGGs"; 
 const GAME_URL = "https://telegramchessbot.onrender.com"; 
+const GAME_SHORT_NAME = "Optimal_Chess"; // Your Short Name
 
 // ==========================================
 // GAME STATE
@@ -41,7 +42,6 @@ function createRoom(roomId) {
   return room;
 }
 
-// ... (Keep your startRoomTimer and stopRoomTimer functions exactly as they are) ...
 function startRoomTimer(roomId) {
   const room = rooms[roomId];
   if (!room || room.isTimerRunning) return;
@@ -75,9 +75,8 @@ function stopRoomTimer(roomId) {
   room.isTimerRunning = false;
 }
 
-
 // ==========================================
-// ROUTES & SOCKET.IO (Keep exactly as they are)
+// ROUTES
 // ==========================================
 app.get("/", (req, res) => res.render("index"));
 app.get("/room/:id", (req, res) => {
@@ -86,187 +85,148 @@ app.get("/room/:id", (req, res) => {
   res.render("room", { roomId });
 });
 
+// ==========================================
+// SOCKET.IO LOGIC
+// ==========================================
 io.on("connection", (socket) => {
-    // ... (Keep your existing Socket.IO logic here exactly as it is) ...
-    // Copy-paste your existing socket logic: check_room_status, initialize_room, joinRoom, move, disconnect
-    // (Omitted here for brevity, but do not delete it in your file)
-    socket.on("check_room_status", (roomId) => {
-        roomId = roomId.toUpperCase();
-        if (!rooms[roomId]) createRoom(roomId);
-        const room = rooms[roomId];
-        if (!room.settings) {
-            socket.emit("room_status", "empty"); 
-        } else {
-            socket.emit("room_status", "waiting");
-        }
-    });
+  socket.on("check_room_status", (roomId) => {
+    roomId = roomId.toUpperCase();
+    if (!rooms[roomId]) createRoom(roomId);
+    const room = rooms[roomId];
+    
+    if (!room.settings) {
+        socket.emit("room_status", "empty"); 
+    } else {
+        socket.emit("room_status", "waiting");
+    }
+  });
 
-    socket.on("initialize_room", (data) => {
-        const { roomId, settings } = data;
-        const rId = roomId.toUpperCase();
-        if (!rooms[rId]) return;
-        rooms[rId].settings = settings;
-        const t = parseInt(settings.time) || 600;
-        rooms[rId].timers = { w: t, b: t };
-    });
+  socket.on("initialize_room", (data) => {
+      const { roomId, settings } = data;
+      const rId = roomId.toUpperCase();
+      if (!rooms[rId]) return;
 
-    socket.on("joinRoom", data => {
-        let roomId, forcedRole;
-        if (typeof data === "string") roomId = data.toUpperCase();
-        else { roomId = data.roomId.toUpperCase(); forcedRole = data.role; }
-    
-        if (!rooms[roomId]) createRoom(roomId);
-        const room = rooms[roomId];
-    
-        socket.join(roomId);
-        socket.data.currentRoom = roomId;
-    
-        if (forcedRole === "w") {
-          room.white = socket.id;
-          socket.emit("init", { role: "w", fen: room.chess.fen(), timers: room.timers });
-        } 
-        else if (forcedRole === "b") {
-          room.black = socket.id;
-          socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
-        }
-        else {
-          if (room.white && !room.black) {
-            room.black = socket.id;
-            socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
-          }
-          else if (room.black && !room.white) {
-            room.white = socket.id;
-            socket.emit("init", { role: "w", fen: room.chess.fen(), timers: room.timers });
-          }
-          else {
-            room.watchers.add(socket.id);
-            socket.emit("init", { role: null, fen: room.chess.fen(), timers: room.timers });
-          }
-        }
-    
-        if (room.white && room.black) {
-          io.to(roomId).emit("boardstate", room.chess.fen());
-          io.to(roomId).emit("timers", room.timers);
-        }
-    });
+      rooms[rId].settings = settings;
+      const t = parseInt(settings.time) || 600;
+      rooms[rId].timers = { w: t, b: t };
+  });
 
-    socket.on("move", (data) => {
-        try {
-          const roomId = socket.data.currentRoom || data.roomId;
-          if (!roomId || !rooms[roomId]) return;
-          const room = rooms[roomId];
-          const mv = data.move;
-    
-          const turn = room.chess.turn();
-          if ((turn === "w" && socket.id !== room.white) || (turn === "b" && socket.id !== room.black)) return;
-    
-          const result = room.chess.move(mv);
-          if (!result) return;
-    
-          io.to(roomId).emit("move", mv);
-          io.to(roomId).emit("boardstate", room.chess.fen());
-          io.to(roomId).emit("timers", room.timers);
-    
-          stopRoomTimer(roomId);
-          startRoomTimer(roomId);
-    
-          if (room.chess.isGameOver()) {
-            stopRoomTimer(roomId);
-            let winner = "";
-            if (room.chess.isCheckmate()) winner = room.chess.turn() === "w" ? "Black" : "White";
-            else if (room.chess.isDraw()) winner = "Draw";
-            else winner = "Game Over";
-            io.to(roomId).emit("gameover", winner);
-          }
-        } catch (err) {}
-    });
-    
-    socket.on("disconnect", () => {
-        const roomId = socket.data.currentRoom;
-        if (roomId && rooms[roomId]) {
-          const room = rooms[roomId];
-          if (room.white === socket.id) room.white = null;
-          if (room.black === socket.id) room.black = null;
-          if (!room.white && !room.black) {
-            stopRoomTimer(roomId);
-            delete rooms[roomId];
-          }
-        }
-    });
+  socket.on("joinRoom", data => {
+    let roomId, forcedRole;
+    if (typeof data === "string") roomId = data.toUpperCase();
+    else { roomId = data.roomId.toUpperCase(); forcedRole = data.role; }
+
+    if (!rooms[roomId]) createRoom(roomId);
+    const room = rooms[roomId];
+
+    socket.join(roomId);
+    socket.data.currentRoom = roomId;
+
+    if (forcedRole === "w") {
+      room.white = socket.id;
+      socket.emit("init", { role: "w", fen: room.chess.fen(), timers: room.timers });
+    } 
+    else if (forcedRole === "b") {
+      room.black = socket.id;
+      socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
+    }
+    else {
+      if (room.white && !room.black) {
+        room.black = socket.id;
+        socket.emit("init", { role: "b", fen: room.chess.fen(), timers: room.timers });
+      }
+      else if (room.black && !room.white) {
+        room.white = socket.id;
+        socket.emit("init", { role: "w", fen: room.chess.fen(), timers: room.timers });
+      }
+      else {
+        room.watchers.add(socket.id);
+        socket.emit("init", { role: null, fen: room.chess.fen(), timers: room.timers });
+      }
+    }
+
+    if (room.white && room.black) {
+      io.to(roomId).emit("boardstate", room.chess.fen());
+      io.to(roomId).emit("timers", room.timers);
+    }
+  });
+
+  socket.on("move", (data) => {
+    try {
+      const roomId = socket.data.currentRoom || data.roomId;
+      if (!roomId || !rooms[roomId]) return;
+      const room = rooms[roomId];
+      const mv = data.move;
+
+      const turn = room.chess.turn();
+      if ((turn === "w" && socket.id !== room.white) || (turn === "b" && socket.id !== room.black)) return;
+
+      const result = room.chess.move(mv);
+      if (!result) return;
+
+      io.to(roomId).emit("move", mv);
+      io.to(roomId).emit("boardstate", room.chess.fen());
+      io.to(roomId).emit("timers", room.timers);
+
+      stopRoomTimer(roomId);
+      startRoomTimer(roomId);
+
+      if (room.chess.isGameOver()) {
+        stopRoomTimer(roomId);
+        let winner = "";
+        if (room.chess.isCheckmate()) winner = room.chess.turn() === "w" ? "Black" : "White";
+        else if (room.chess.isDraw()) winner = "Draw";
+        else winner = "Game Over";
+        io.to(roomId).emit("gameover", winner);
+      }
+    } catch (err) {}
+  });
+
+  socket.on("disconnect", () => {
+    const roomId = socket.data.currentRoom;
+    if (roomId && rooms[roomId]) {
+      const room = rooms[roomId];
+      if (room.white === socket.id) room.white = null;
+      if (room.black === socket.id) room.black = null;
+      if (!room.white && !room.black) {
+        stopRoomTimer(roomId);
+        delete rooms[roomId];
+      }
+    }
+  });
 });
 
-
 // ==========================================
-// TELEGRAM BOT LOGIC (UPDATED)
+// TELEGRAM BOT LOGIC (NATIVE GAME PLATFORM)
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
+// 1. Handle /start - Send the native Game card
 bot.command('start', (ctx) => {
-    ctx.replyWithPhoto(
-        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
-        {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start a game.",
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback("🎮 Create New Game", "create_game")]
-            ])
-        }
-    );
+    return ctx.replyWithGame(GAME_SHORT_NAME);
 });
 
-// 1. UPDATED CREATE GAME ACTION
-bot.action("create_game", (ctx) => {
+// 2. Handle "Play" Button Click
+// This function runs whenever someone clicks the "Play" button on the Game Card.
+// We generate a unique Room ID here and send them to the URL.
+bot.gameQuery((ctx) => {
     const roomId = makeRoomId();
-    const gameLink = `${GAME_URL}/room/${roomId}`;
-    
-    ctx.replyWithPhoto(
-        "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
-        {
-            caption: `♟️ <b>Chess Game Created!</b>\n\nRoom ID: <code>${roomId}</code>\n\nTo play with a friend:\n1. Tap 'Share Game'\n2. Choose a friend\n3. Tap the result to send the invite!`,
-            parse_mode: "HTML",
-            ...Markup.inlineKeyboard([
-                [Markup.button.webApp("🚀 Enter The Game", gameLink)],
-                // This 'switchToChat' button opens the chat list and types "@botname <roomId>"
-                [Markup.button.switchToChat("📤 Share Game", roomId)]
-            ])
-        }
-    );
+    // Use the ctx.callbackQuery.id to answer
+    const url = `${GAME_URL}/room/${roomId}`;
+    return ctx.answerGameQuery(url);
 });
 
-// 2. NEW INLINE QUERY HANDLER
+// 3. Handle Inline Queries (Typing @YourBot in another chat)
 bot.on('inline_query', async (ctx) => {
-    const query = ctx.inlineQuery.query.trim();
-    let roomId = query;
-    let title = "Share Chess Game";
-    let description = "Send an invite for this game room.";
-
-    // If user types just "@botname" without ID, let them create a new one
-    if (!roomId) {
-        roomId = makeRoomId();
-        title = "Create New Game";
-        description = "Start a fresh chess match.";
-    }
-
-    const gameLink = `${GAME_URL}/room/${roomId}`;
-
+    // We return a "Game" result. 
+    // This allows users to share the game card directly to any chat.
     await ctx.answerInlineQuery([
         {
-            type: 'article',
-            id: roomId,
-            title: title,
-            description: description,
-            thumbnail_url: "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg",
-            input_message_content: {
-                message_text: `♟️ <b>Chess Invitation</b>\n\nRoom ID: <code>${roomId}</code>\n\nClick below to join the match!`,
-                parse_mode: 'HTML'
-            },
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "🚀 Play Chess", web_app: { url: gameLink } }]
-                ]
-            }
+            type: 'game',
+            id: '0',
+            game_short_name: GAME_SHORT_NAME
         }
-    ], { cache_time: 0 }); // Disable caching so unique IDs are always generated
+    ], { cache_time: 0 });
 });
 
 bot.launch();
