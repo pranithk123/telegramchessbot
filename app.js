@@ -21,9 +21,10 @@ const GAME_URL = "https://telegramchessbot.onrender.com";
 const GAME_SHORT_NAME = "Optimal_Chess"; 
 
 // ==========================================
-// GAME STATE
+// GAME STATE & MAPPINGS
 // ==========================================
 const rooms = Object.create(null);
+const messageToRoom = new Map(); // Maps Telegram Message ID -> Room ID
 
 const makeRoomId = () => crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
 
@@ -42,6 +43,7 @@ function createRoom(roomId) {
   return room;
 }
 
+// ... [Keep your existing startRoomTimer and stopRoomTimer functions here] ...
 function startRoomTimer(roomId) {
   const room = rooms[roomId];
   if (!room || room.isTimerRunning) return;
@@ -86,26 +88,22 @@ app.get("/room/:id", (req, res) => {
 });
 
 // ==========================================
-// SOCKET.IO LOGIC
+// SOCKET.IO LOGIC (Keep EXACTLY as before)
 // ==========================================
 io.on("connection", (socket) => {
+  // [Paste your existing socket logic here: check_room_status, joinRoom, move, etc.]
   socket.on("check_room_status", (roomId) => {
     roomId = roomId.toUpperCase();
     if (!rooms[roomId]) createRoom(roomId);
     const room = rooms[roomId];
-    
-    if (!room.settings) {
-        socket.emit("room_status", "empty"); 
-    } else {
-        socket.emit("room_status", "waiting");
-    }
+    if (!room.settings) socket.emit("room_status", "empty"); 
+    else socket.emit("room_status", "waiting");
   });
 
   socket.on("initialize_room", (data) => {
       const { roomId, settings } = data;
       const rId = roomId.toUpperCase();
       if (!rooms[rId]) return;
-
       rooms[rId].settings = settings;
       const t = parseInt(settings.time) || 600;
       rooms[rId].timers = { w: t, b: t };
@@ -197,16 +195,16 @@ io.on("connection", (socket) => {
 });
 
 // ==========================================
-// TELEGRAM BOT LOGIC
+// TELEGRAM BOT LOGIC (Fixed Mappings)
 // ==========================================
 const bot = new Telegraf(BOT_TOKEN);
 
-// 1. /start: Show the "Create New Game" button first
+// 1. Start Command - Menu
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
         {
-            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start a new game.",
+            caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start.",
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
                 [Markup.button.callback("🎮 Create New Game", "create_game")]
@@ -215,20 +213,39 @@ bot.command('start', (ctx) => {
     );
 });
 
-// 2. Action: When user clicks "Create New Game", send the GAME CARD
+// 2. Action - Send the Game Card
 bot.action("create_game", (ctx) => {
-    // This sends the "Play Optimal_Chess" button
     return ctx.replyWithGame(GAME_SHORT_NAME);
 });
 
-// 3. Game Query: When user clicks "Play Optimal_Chess" on the card
+// 3. Game Query - The Logic Fix
 bot.gameQuery((ctx) => {
-    const roomId = makeRoomId();
+    // We create a unique key for the message that was clicked.
+    // If inline: uses inline_message_id
+    // If chat: uses chat_id + message_id
+    let messageKey;
+    if (ctx.callbackQuery.inline_message_id) {
+        messageKey = ctx.callbackQuery.inline_message_id;
+    } else if (ctx.callbackQuery.message) {
+        messageKey = `${ctx.callbackQuery.message.chat.id}_${ctx.callbackQuery.message.message_id}`;
+    }
+
+    let roomId;
+
+    // Check if this message already has a room
+    if (messageToRoom.has(messageKey)) {
+        roomId = messageToRoom.get(messageKey);
+    } else {
+        // If not, create a new one and save it
+        roomId = makeRoomId();
+        messageToRoom.set(messageKey, roomId);
+    }
+
     const url = `${GAME_URL}/room/${roomId}`;
     return ctx.answerGameQuery(url);
 });
 
-// 4. Inline Query: Allow sharing via @YourBotName
+// 4. Inline Query - Share Handler
 bot.on('inline_query', async (ctx) => {
     await ctx.answerInlineQuery([
         {
