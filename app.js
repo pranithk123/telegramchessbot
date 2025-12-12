@@ -200,6 +200,7 @@ io.on("connection", (socket) => {
 const bot = new Telegraf(BOT_TOKEN);
 
 // 1. Start Command - Menu
+// [cit: 1] 1. Start Command - Menu
 bot.command('start', (ctx) => {
     ctx.replyWithPhoto(
         "https://upload.wikimedia.org/wikipedia/commons/6/6f/ChessSet.jpg", 
@@ -207,7 +208,10 @@ bot.command('start', (ctx) => {
             caption: "<b>Welcome to Chess Master!</b>\n\nClick below to start.",
             parse_mode: "HTML",
             ...Markup.inlineKeyboard([
-                [Markup.button.callback("🎮 Create New Game", "create_game")]
+                // Existing button
+                [Markup.button.callback("🎮 Create New Game", "create_game")],
+                // NEW BUTTON: Opens chat picker to share the game
+                [Markup.button.switchToChat("👫 Invite Friends to Play", "")] 
             ])
         }
     );
