@@ -16,9 +16,10 @@ body { background:#181818; color:#fff; font-family:sans-serif; display:flex; fle
 .light { background:#ebecd0; }
 .dark { background:#779556; }
 .piece { width:42.5px; height:42.5px; position:absolute; top:0; left:0; pointer-events:none; z-index:10; }
-.piece-img { width:40px; height:40px; }
-.flipped { transform:rotate(180deg); }
-.flipped .square { transform:rotate(180deg); }
+.piece-img { width:40px; height:40px; transition: transform 0.2s ease; }
+
+/* FLIPPED LOGIC: We only rotate the pieces, not the whole board container */
+.flipped .piece-img { transform: rotate(180deg); }
 
 /* HIGHLIGHTS */
 .selected { background: rgba(255, 255, 0, 0.5); }

@@ -94,6 +94,12 @@ function renderBoard() {
   boardEl = document.querySelector(".chessboard");
   if (!boardEl) return;
   boardEl.innerHTML = "";
+
+  let visualRow = (role === "b") ? (7 - r) : r;
+let visualCol = (role === "b") ? (7 - c) : c;
+
+div.style.left = `${visualCol * 42.5}px`;
+div.style.top = `${visualRow * 42.5}px`;
   
   const board = chess.board();
   board.forEach((row, r) => {
